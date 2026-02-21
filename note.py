@@ -6,7 +6,7 @@ fs = 44100
 duration = 7.5
 
 # C major chord frequencies
-frequencies = [261.63, 328.63, 392.00, 493.88]
+frequencies = [261.63, 328.63, 392.00, 261.63*2]
 
 # Time array
 t = np.linspace(0, duration, int(fs * duration), endpoint=False)
