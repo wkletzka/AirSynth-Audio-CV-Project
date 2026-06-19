@@ -12,12 +12,13 @@ import time
 class SimpleSynth:
     def __init__(self):
         self.sample_rate = 44100
-        self.phase = 0
+        self.phase = 0 # We track phase as a raw angle (0 to 2*PI) instead of frame counts
         self.frequency = 261.63
+        self.current_freq = 261.63
 
         self.current_amp = 0.0 # Using curr and target amps for an 'envelope' to fade the sounds in
         self.target_amp = 0.0
-        self.amp_ramp = 0.002  # bigger ramp = faster fade
+        self.amp_ramp = 0.0005  # bigger ramp = faster fade
 
         self.stream = sd.OutputStream(
             channels=1,
@@ -28,25 +29,36 @@ class SimpleSynth:
 
     # Audio callback function is what it uses to call itself over and over
     def audio_callback(self, outdata, frames, time_info, status): 
-        # Smoothing the frequency - slowly moves actual played (current) freq to target freq, like a weighted avg that converges to the target 
-        self.current_freq = 0.9 * self.current_freq + 0.1 * self.frequency
+        # Calculate the targets for the end of this specific block
+        next_freq = 0.9 * self.current_freq + 0.1 * self.frequency
 
-        # Amplitude fade/envelope
+        next_amp = self.current_amp
         if self.current_amp < self.target_amp:
-            self.current_amp += self.amp_ramp * frames
-            if self.current_amp > self.target_amp:
-                self.current_amp = self.target_amp
-        else:
-            self.current_amp -= self.amp_ramp * frames
-            if self.current_amp < self.target_amp:
-                self.current_amp = self.target_amp
+            next_amp = min(self.current_amp + self.amp_ramp * frames, self.target_amp)
+        elif self.current_amp > self.target_amp:
+            next_amp = max(self.current_amp - self.amp_ramp * frames, self.target_amp)
 
-        # Waveform
-        t = (np.arange(frames) + self.phase) / self.sample_rate
-        wave = self.current_amp * np.sin(2 * np.pi * self.current_freq * t)
+        # Interpolation:
+        # Instead of 1 flat number, create an array of values that smoothly glide 
+        # from the current state to the next state over the length of the buffer.
+        freqs = np.linspace(self.current_freq, next_freq, frames, endpoint=False)
+        amps = np.linspace(self.current_amp, next_amp, frames, endpoint=False)
+
+        # Continuous phase accumulation:
+        # Calculate exactly how much the angle changes per sample, then cumulatively add it
+        phase_increments = 2 * np.pi * freqs / self.sample_rate
+        phases = self.phase + np.cumsum(phase_increments)
+        
+        # Generate the perfectly smooth waveform
+        wave = amps * np.sin(phases)
+
+        # Save state for the next callback
+        # Use modulo 2*PI so the float doesn't eventually overflow after playing for 3 hours
+        self.phase = phases[-1] % (2 * np.pi) 
+        self.current_freq = next_freq
+        self.current_amp = next_amp
 
         outdata[:] = wave.reshape(-1, 1)
-        self.phase += frames
 
     def stop(self):
         self.stream.stop()
@@ -122,10 +134,13 @@ try: # Error handling
 
         color_image = np.asanyarray(color_frame.get_data())
 
+        # flip the colors so MediaPipe can 'see' properly, needs RGB not BGR
+        rgb_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
+
         # Format the image to be a mediapipe image so that the hand detector works properly
         mp_image = mp.Image(
             image_format=mp.ImageFormat.SRGB,
-            data=color_image
+            data=rgb_image
         )
 
         timestamp_ms = int(time.time() * 1000)
@@ -142,18 +157,18 @@ try: # Error handling
             middle_fing_x_pixel = int(hand1[12].x * 640) # Tip of middle finger 
             curr_key = middle_fing_x_pixel // key_width # Integer round to the nearest note
 
-            x = int(hand[9].x * 640) 
-            y = int(hand[9].y * 480) 
+            x = int(hand1[9].x * 640) 
+            y = int(hand1[9].y * 480) 
             x = max(0, min(x, 639)) # Clamp the coordinates so they can't go our of bounds and crash script 
             y = max(0, min(y, 479)) 
             depth_to_palm = depth_frame.get_distance(x,y)
+            print(depth_to_palm)
 
-            if (0.3048 < depth_to_palm and depth_to_palm < 0.9144): # If we're within 1 to 3 feet of depth
-                if (0 <= key < 8): # key should be between idx 0 and 7
-                    synth.frequency = notes[curr_key]
-                    synth.target_amp = 0.5
-            else:
-                synth.target_amp = 0.0
+             # Potentially add depth rules to this later, but it's causing choppy audio currently
+            if (0 <= curr_key < 8): # key should be between idx 0 and 7
+                synth.frequency = notes[curr_key]
+                synth.target_amp = 0.5
+            
 
             # Draw the landmarks on screen for a visual 
             for hand in result.hand_landmarks:
