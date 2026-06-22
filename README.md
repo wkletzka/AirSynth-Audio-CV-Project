@@ -1,4 +1,4 @@
-# Spatial Audio Instrument
+# AirSynth
 
 ## 🎵 Overview
 
