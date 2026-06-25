@@ -15,9 +15,9 @@ _(Update this section as the project evolves)_
 ## 🚀 Setup and Installation
 
 1. Connect the Depth Camera to your machine.
-2. Install the necessary drivers (Link to drivers here).
-3. Clone this repository: `git clone [your-repo-link]`
-4. Open the main project file in [Software Name].
+2. Install the necessary drivers 
+3. Clone this repository
+4. Open the main project file
 5. Route the MIDI/OSC output to your audio software.
 
 ## 🤝 Contributing
